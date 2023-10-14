@@ -132,6 +132,7 @@ contract ERC721 is IERC721, IERC165{
     }
 
     // Reference Link: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L429-L451
+    //要求接收地址需是錢包地址或可接收的ERC721的合約地址
     function _checkOnERC721Received(address from, address to, uint256 tokenId, bytes memory data) private returns (bool) {
         if (to.code.length > 0 /* to is a contract*/) {
             try IERC721Receiver(to).onERC721Received(msg.sender, from, tokenId, data) returns (bytes4 retval) {
