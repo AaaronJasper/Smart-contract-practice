@@ -9,27 +9,15 @@ contract AMM{
     mapping (address => mapping(address => address)) public checkLPtokenAddress;
     //LPtoken地址列
     address [] public LPtokenAddressList;
+    //LPtoken數量
+    mapping  (address => uint) public checkLPtokenAmount;
     //項目方的錢包地址
     address public immutable owner;
-    //項目方增發LPtoken數量紀錄
-    mapping (address => uint) public checkLPtokenOwner;
-    //增加流動性
-    event AddLiquidity(address token0, address token1, uint token0_amount, uint token1_amount);
-    //減少流動性
-    event MinusLiquidity(address token0, address token1, uint token0_amount, uint token1_amount);
-    //兌換
-    event Swap(address tokenIn, address tokenOut, uint amountIn, uint amountOut);
-    //執行增發
-    event MintLPtokenForOwner(uint shares);
 
     constructor(){
         owner = msg.sender;
     }
-    //只有創建者才能使用
-    modifier onlyOwner{
-        require(msg.sender == owner,"Only owner can use");
-        _;
-    }
+
     //建立池子
     function createLptokenPair(address token0, address token1) private returns(address){
         bytes32 _salt = keccak256(
@@ -48,11 +36,11 @@ contract AMM{
         return LPtokenAddress;
     }
     //添加流動性
-    function addLiquidity (address _token0, address _token1, uint _amount0, uint _amount1)
-        external
-        returns (uint shares){
-        require(_token0 != address(0) && _token1 != address(0),"Address can not be 0x00");
+    function addLiquidity (address _token0, address _token1, uint _amount0, uint _amount1) external returns (uint shares){
+        //地址不能相同
         require(_token0 != _token1,"Address can not be the same");
+        //地址不能為零
+        require(_token0 != address(0) && _token1 != address(0),"Address can not be 0x00");
         //確認池子對是否已存在
         if(checkLPtokenAddress[_token0][_token1] == address(0) && checkLPtokenAddress[_token1][_token0] == address(0)){
             //創建新池子對的LPtoken地址
@@ -70,6 +58,7 @@ contract AMM{
             shares = _sqrt(_amount0 * _amount1);
             //鑄造獎勵代幣
             lpTokenInstance.mint(msg.sender,shares);
+            checkLPtokenAmount[LPtokenAddress] += shares;
         }else{
             //LPtoken的地址
             address LPtokenAddress = checkLPtokenAddress[_token1][_token0];
@@ -92,17 +81,13 @@ contract AMM{
             shares = (_amount0 * totalSupply)/reserve0;
             //鑄造獎勵代幣
             lpTokenInstance.mint(msg.sender,shares);
+            checkLPtokenAmount[LPtokenAddress] += shares;
         }
-        emit AddLiquidity(_token0, _token1, _amount0, _amount1);
     }
     //減少流動性
-    function minusLiquidity (address _token0, address _token1, uint _amountLp) 
-        external 
-        returns (uint _amount0, uint _amount1){
-        require(_token0 != address(0) && _token1 != address(0),"Address can not be 0x00");
-        require(_token0 != _token1,"Address can not be the same");
+    function minusLiquidity (address _token0, address _token1, uint _amountLp) external returns (uint _amount0, uint _amount1){
         //LPtoken池子地址
-        address LPtokenAddress = checkLPtokenAddress[_token0][_token1];
+        address LPtokenAddress = checkLPtokenAddress[_token1][_token0];
         LPtoken lpTokenInstance = LPtoken(LPtokenAddress);
         //LPtoken的總數量
         uint totalSupply = lpTokenInstance.totalSupply();
@@ -117,25 +102,19 @@ contract AMM{
         token0.transfer(msg.sender, _amount0);
         token1.transfer(msg.sender, _amount1);
         //減少池子
-        reserve0 -= _amount0;
-        reserve1 -= _amount1;
+        reserve[LPtokenAddress][_token0] -= _amount0;
+        reserve[LPtokenAddress][_token1] -= _amount1;
         //燒毀LPtoken
         lpTokenInstance.burn(msg.sender, _amountLp);
-        emit MinusLiquidity(_token0, _token1, _amount0, _amount1);
+        checkLPtokenAmount[LPtokenAddress] -= _amountLp;
     }
     //兌換
-    function swap (address _tokenIn, address _tokenOut, uint _amountIn) 
-        external 
-        returns (uint _amountOut){
-        require(_tokenIn != address(0) && _tokenOut != address(0),"Address can not be 0x00");
-        require(_tokenIn != _tokenOut,"Address can not be the same");
+    function swap (address _tokenIn, address _tokenOut, uint _amountIn) external returns (uint _amountOut){
         //LPtoken池子地址
         address LPtokenAddress = checkLPtokenAddress[_tokenIn][_tokenOut];
         //返回數量
         uint reserveIn = reserve[LPtokenAddress][_tokenIn];
         uint reserveOut = reserve[LPtokenAddress][_tokenOut];
-        //原始流動性
-        uint k = reserveIn * reserveOut * 1e8;
         //扣除手續費
         _amountIn = (_amountIn * 997) / 1000;
         //計算原始換出量
@@ -148,45 +127,13 @@ contract AMM{
         //池內數量調整
         reserve[LPtokenAddress][_tokenIn] += _amountIn;
         reserve[LPtokenAddress][_tokenOut] -= _amountOut;
-        //執行增發代幣
-        caculateFee(LPtokenAddress, _tokenIn, _tokenOut, k);
-        emit Swap(_tokenIn, _tokenOut, _amountIn, _amountOut);
-    }
-    //計算手續費並紀錄
-    function caculateFee (address LPtokenAddress, address _tokenIn, address _tokenOut, uint k) private returns(uint){
-        //返回數量
-        uint reserve0 = reserve[LPtokenAddress][_tokenIn];
-        uint reserve1 = reserve[LPtokenAddress][_tokenOut];
-        //新的流動性
-        uint newK = reserve0 * reserve1 * 1e8;
-        //增發數量
-        ERC20 LP = ERC20(LPtokenAddress);
-        uint totalSupply = LP.totalSupply();
-        uint sm = ((_sqrt(newK) - _sqrt(k)) * totalSupply) * 1e8/ ((5 * _sqrt(newK)) + _sqrt(k));
-        //紀錄獎勵代幣
-        checkLPtokenOwner[LPtokenAddress] += sm;
-        return sm;
-    }
-    //執行增發獎勵
-    function mintLPtokenForOwner (address LPtokenAddress) public onlyOwner(){
-        //取得增發獎勵
-        uint sm10000 = checkLPtokenOwner[LPtokenAddress];
-        //數量必須大於一顆
-        require(sm10000 >= 1e8 ,"Not enough LPtoken");
-        uint sm = sm10000 / 1e8;
-        //鑄造獎勵代幣
-        LPtoken lpTokenInstance = LPtoken(LPtokenAddress);
-        lpTokenInstance.mint(owner,sm);
-        //減去發行數量
-        checkLPtokenOwner[LPtokenAddress] -= sm * 1e8;
-        emit MintLPtokenForOwner(sm);
     }
     //計算滑點
     function caculateSlip (uint dx, uint x, uint y) external pure returns (uint new_dy, uint dy, uint ans){
         new_dy = dx * y / (x + dx);
         dy = dx * y / x;
-        uint slip = new_dy * 1e4 / dy;
-        ans = 1e4 - slip;
+        uint slip = new_dy * 10000 / dy;
+        ans = 10000 - slip;
         return (new_dy,dy,ans);
     }
     //計算兌換
