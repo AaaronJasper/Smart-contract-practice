@@ -67,7 +67,7 @@ contract AMM{
             reserve[LPtokenAddress][_token0] += _amount0;
             reserve[LPtokenAddress][_token1] += _amount1;
             //返回獎勵
-            shares = _sqrt(_amount0 * _amount1);
+            shares = _sqrt(_amount0 * 1e8 * _amount1 * 1e8);
             //鑄造獎勵代幣
             lpTokenInstance.mint(msg.sender,shares);
         }else{
@@ -89,7 +89,7 @@ contract AMM{
             reserve[LPtokenAddress][_token0] += _amount0;
             reserve[LPtokenAddress][_token1] += _amount1;
             //返回獎勵
-            shares = (_amount0 * totalSupply)/reserve0;
+            shares = (_amount0 * 1e8 * totalSupply)/reserve0;
             //鑄造獎勵代幣
             lpTokenInstance.mint(msg.sender,shares);
         }
@@ -117,8 +117,8 @@ contract AMM{
         token0.transfer(msg.sender, _amount0);
         token1.transfer(msg.sender, _amount1);
         //減少池子
-        reserve0 -= _amount0;
-        reserve1 -= _amount1;
+        reserve[LPtokenAddress][_token0] -= _amount0;
+        reserve[LPtokenAddress][_token1] -= _amount1;
         //燒毀LPtoken
         lpTokenInstance.burn(msg.sender, _amountLp);
         emit MinusLiquidity(_token0, _token1, _amount0, _amount1);
@@ -135,11 +135,11 @@ contract AMM{
         uint reserveIn = reserve[LPtokenAddress][_tokenIn];
         uint reserveOut = reserve[LPtokenAddress][_tokenOut];
         //原始流動性
-        uint k = reserveIn * reserveOut * 1e8;
+        uint k = reserveIn * reserveOut;
         //扣除手續費
-        _amountIn = (_amountIn * 997) / 1000;
-        //計算原始換出量
-        _amountOut = (_amountIn * reserveOut) / (_amountIn + reserveIn); 
+        uint _newAmountIn = (_amountIn * 997) / 1000;
+        //計算換出量
+        _amountOut = (_newAmountIn * reserveOut) / (_newAmountIn + reserveIn); 
         //轉移ERC20
         ERC20 token0 = ERC20(_tokenIn);
         ERC20 token1 = ERC20(_tokenOut);
@@ -158,11 +158,11 @@ contract AMM{
         uint reserve0 = reserve[LPtokenAddress][_tokenIn];
         uint reserve1 = reserve[LPtokenAddress][_tokenOut];
         //新的流動性
-        uint newK = reserve0 * reserve1 * 1e8;
+        uint newK = reserve0 * reserve1;
         //增發數量
         ERC20 LP = ERC20(LPtokenAddress);
         uint totalSupply = LP.totalSupply();
-        uint sm = ((_sqrt(newK) - _sqrt(k)) * totalSupply) * 1e8/ ((5 * _sqrt(newK)) + _sqrt(k));
+        uint sm = ((_sqrt(newK) - _sqrt(k)) * totalSupply) / ((5 * _sqrt(newK)) + _sqrt(k));
         //紀錄獎勵代幣
         checkLPtokenOwner[LPtokenAddress] += sm;
         return sm;
@@ -170,15 +170,12 @@ contract AMM{
     //執行增發獎勵
     function mintLPtokenForOwner (address LPtokenAddress) public onlyOwner(){
         //取得增發獎勵
-        uint sm10000 = checkLPtokenOwner[LPtokenAddress];
-        //數量必須大於一顆
-        require(sm10000 >= 1e8 ,"Not enough LPtoken");
-        uint sm = sm10000 / 1e8;
+        uint sm = checkLPtokenOwner[LPtokenAddress];
         //鑄造獎勵代幣
         LPtoken lpTokenInstance = LPtoken(LPtokenAddress);
         lpTokenInstance.mint(owner,sm);
         //減去發行數量
-        checkLPtokenOwner[LPtokenAddress] -= sm * 1e8;
+        checkLPtokenOwner[LPtokenAddress] -= sm;
         emit MintLPtokenForOwner(sm);
     }
     //計算滑點
